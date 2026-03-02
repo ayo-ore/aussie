@@ -3,7 +3,7 @@
 AUSSIE is a non-iterative, discriminative method for unbinned unfolding of multidimensional collider observables. It reweights a simulated reference dataset to correct for detector effects without requiring iterations, adversarial training, or surrogate forward models.
 
 > **Paper** &nbsp; *"Unfolding without Iterations, Adversaries, or Surrogates"*
-> Ayodele Ore and Tilman Plehn — [arXiv:XXXX.XXXXX](https://arxiv.org/abs/XXXX.XXXXX)
+> Ayodele Ore and Tilman Plehn — [arXiv:2602.24282](https://arxiv.org/abs/2602.24282)
 
 ## Overview
 
@@ -153,13 +153,14 @@ tensorboard --logdir runs/
 If you use this code, please cite:
 
 ```bibtex
-@article{Ore:2025aussie,
-    author  = {Ore, Ayodele and Plehn, Tilman},
-    title   = {Unfolding without Iterations, Adversaries, or Surrogates},
-    year    = {2026},
-    eprint  = {XXXX.XXXXX},
-    archivePrefix = {arXiv},
-    primaryClass  = {hep-ph}
+@article{Ore:2026qgp,
+    author = "Ore, Ayodele and Plehn, Tilman",
+    title = "{Unfolding without Iterations, Adversaries, or Surrogates}",
+    eprint = "2602.24282",
+    archivePrefix = "arXiv",
+    primaryClass = "hep-ph",
+    month = "2",
+    year = "2026"
 }
 ```
 
