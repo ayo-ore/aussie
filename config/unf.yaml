@@ -13,6 +13,8 @@ loss: mlc
 norm: l1
 joint_ensembling: false
 norm_target: false
+kernel_p: 2
+kernel_scale: 1
 
 model:
   _target_: src.models.Unfolder
