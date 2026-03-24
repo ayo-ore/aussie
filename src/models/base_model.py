@@ -5,8 +5,6 @@ import logging
 
 from abc import abstractmethod
 from collections import defaultdict
-from hydra.utils import instantiate
-from omegaconf import DictConfig
 
 from src.datasets import UnfoldingData
 
@@ -15,20 +13,15 @@ log = logging.getLogger("Model")
 
 class Model(nn.Module):
 
-    def __init__(self, cfg: DictConfig):
+    def __init__(self, net):
 
         super().__init__()
 
-        self.cfg = cfg
-
         # networks
-        self.net = instantiate(cfg.net)
+        self.net = net
 
         # logging
         self.log_buffer = defaultdict(list)
-
-        # ensembling
-        self.ensembled = self.net.ensembled
 
     @abstractmethod
     def batch_loss(self, batch: UnfoldingData, training=True):
@@ -38,7 +31,9 @@ class Model(nn.Module):
     def trainable_parameters(self):
         return (p for p in self.parameters() if (p.requires_grad and p.numel() > 0))
 
-    def update(self, loss, optimizer, scaler, step=None, total_steps=None):
+    def update(
+        self, loss, optimizer, scaler, step=None, total_steps=None, gradient_norm=None
+    ):
 
         # zero parameter gradients
         optimizer.zero_grad(set_to_none=True)
@@ -50,7 +45,7 @@ class Model(nn.Module):
         loss.backward()
 
         # optionally clip gradients
-        if clip := self.cfg.training.gradient_norm:
+        if clip := gradient_norm:
             scaler.unscale_(optimizer)
             grad_norm = nn.utils.clip_grad_norm_(self.trainable_parameters, clip)
             self.log_scalar(grad_norm, "gradient_norm")

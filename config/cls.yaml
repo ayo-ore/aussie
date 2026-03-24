@@ -8,10 +8,10 @@ experiment: ClassificationExperiment
 
 prev_it_path: null
 
-loss: bce
-
 model:
   _target_: src.models.Classifier
+  loss: bce
+  net: ${net}
 
 
 training:

@@ -35,7 +35,8 @@ class UnfoldingExperiment(TrainingExperiment):
                 if batch_sim.sample_logweights is None
                 else batch_sim.sample_logweights
             )
-            lw_z_sim.append(self.model(batch_sim).squeeze(-1) + lw_sample)
+            # lw_z_sim.append(self.model(batch_sim).squeeze(-1) + lw_sample)
+            lw_z_sim.append(self.model(batch_sim)[..., 0] + lw_sample)
 
         if self.model.ensembled:
             predictions["lw_z_sim"] = torch.cat(lw_z_sim, dim=1).cpu()
@@ -79,9 +80,7 @@ class UnfoldingExperiment(TrainingExperiment):
         if (p := self.cfg.prev_it_path) is not None:
 
             lw_sample_sim = torch.from_numpy(
-                np.load(os.path.join(p, "unf/predictions_test.npz"))["lw_z_sim"].mean(
-                    0
-                )
+                np.load(os.path.join(p, "unf/predictions_test.npz"))["lw_z_sim"].mean(0)
             )
             lw_x_sim += lw_sample_sim.numpy()
 

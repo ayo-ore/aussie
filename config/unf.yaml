@@ -9,15 +9,17 @@ experiment: UnfoldingExperiment
 cls_path: ???
 prev_it_path: null
 
-loss: mlc
-norm: l1
-joint_ensembling: false
-norm_target: false
-kernel_p: 2
-kernel_scale: 1
-
 model:
-  _target_: src.models.Unfolder
+  _target_: src.models.KernelUnfolder
+  loss: mlc
+  norm: l1
+  joint_ensembling: false
+  norm_target: false
+  net: ${net}
+  cls_path: ${cls_path}
+  kernel_p: 2
+  kernel_scale: 1
+
 
 training:
   lr: 1e-3

@@ -165,7 +165,14 @@ class Trainer:
             # update model parameters
             step = itr + self.epoch * self.steps_per_epoch
             total_steps = self.cfg.epochs * self.steps_per_epoch
-            self.model.update(loss, self.optimizer, self.scaler, step, total_steps)
+            self.model.update(
+                loss,
+                self.optimizer,
+                self.scaler,
+                step,
+                total_steps,
+                gradient_norm=self.cfg.gradient_norm,
+            )
 
             # update learning rate
             if self.cfg.scheduler:

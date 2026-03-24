@@ -2,7 +2,7 @@ import torch
 import os
 import numpy as np
 from abc import abstractmethod
-from hydra.utils import call, instantiate
+from hydra.utils import instantiate
 from torch.utils.data import DataLoader, random_split
 
 from src.experiments.base_experiment import BaseExperiment
@@ -87,7 +87,7 @@ class TrainingExperiment(BaseExperiment):
     def init_model(self):
         self.log.info("Initializing model")
 
-        self.model = call(self.cfg.model, self.cfg)
+        self.model = instantiate(self.cfg.model)
         self.model = self.model.to(self.device)
         model_name = (
             f"{self.model.__class__.__name__}[{self.model.net.__class__.__name__}]"
