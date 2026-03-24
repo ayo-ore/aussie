@@ -5,17 +5,17 @@ defaults:
   - override /dataset: zjet_particle
   - _self_
 
-norm: l1
-
 data:
   on_gpu: false
 
-net:
-  backbone:
-    hidden_v_channels: 16
-    hidden_s_channels: 64
-    num_blocks: 4
-    num_heads: 4
+model:
+  _target_: src.models.AutoDiffUnfolder
+  net:
+    backbone:
+      hidden_v_channels: 16
+      hidden_s_channels: 64
+      num_blocks: 4
+      num_heads: 4
   
 training:
   lr: 0.005

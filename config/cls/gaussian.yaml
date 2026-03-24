@@ -4,12 +4,13 @@ defaults:
   - override /dataset: gaussian
   - _self_
 
-net:
-  dim_in: ${dataset.process.num_features}
-  dim_out: 1
-  num_hidden_layers: 2
-  hidden_channels: 32
-  ensembled: false
+model:
+  net:
+    dim_in: ${dataset.process.num_features}
+    dim_out: 1
+    num_hidden_layers: 2
+    hidden_channels: 32
+    ensembled: false
 
 training:
   lr: 5e-03

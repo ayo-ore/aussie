@@ -7,42 +7,72 @@ from src.datasets import UnfoldingData
 from src.utils.utils import load_model
 
 
-class KernelUnfolder(Model):
+class Unfolder(Model):
 
     def __init__(
         self,
         net,
         cls_path,
         loss="mlc",
-        norm="l1",
         joint_ensembling=False,
         norm_target=False,
-        kernel_p=2,
-        kernel_scale=1,
+        freeze_classifier=True,
         **kwargs,
     ):
         super().__init__(net)
+        self.cls_path = cls_path
 
         # loss
         self.loss = loss
-        self.norm = norm
         self.norm_target = norm_target
 
         # ensembling
         self.ensembled = self.net.ensembled
         self.joint_ensembling = joint_ensembling
 
-        # kernel
-        self.kernel_p = kernel_p
-        self.kernel_scale = kernel_scale
-
         # load pretrained classifier
-        self.classifier, self.cfg_classifier = load_model(cls_path, freeze=False)
+        self.classifier, self.cfg_classifier = load_model(
+            cls_path, freeze=freeze_classifier
+        )
         self.params_cls = list(self.classifier.parameters())
         self.num_params_cls = sum(p.numel() for p in self.params_cls)
 
         # logging
         self.log_buffer = defaultdict(list)
+
+    @property
+    def lowlevel(self):
+        return self.net.lowlevel
+
+    @property
+    def trainable_parameters(self):
+        return (p for p in self.net.parameters() if (p.requires_grad and p.numel() > 0))
+
+    def forward(self, batch: UnfoldingData):
+        """Return the part-level data-to-sim log-likelihood ratio"""
+
+        if self.lowlevel:
+            return self.net(batch.z, c=batch.cond_z, mask=batch.mask_z)
+
+        return self.net(batch.z)
+
+
+class KernelUnfolder(Unfolder):
+
+    def __init__(
+        self,
+        net,
+        cls_path,
+        kernel_p=2,
+        kernel_scale=1,
+        **kwargs,
+    ):
+
+        super().__init__(net, cls_path, **kwargs)
+
+        # kernel
+        self.kernel_p = kernel_p
+        self.kernel_scale = kernel_scale
 
     def batch_loss(self, batch: UnfoldingData):
 
@@ -52,7 +82,7 @@ class KernelUnfolder(Model):
         # forward pass classifier
         self.classifier.eval()
         with torch.no_grad():
-            lw_x = self.classifier(batch)  # .squeeze(-1)
+            lw_x = self.classifier(batch)
             if self.classifier.ensembled:
 
                 if self.joint_ensembling:
@@ -63,7 +93,7 @@ class KernelUnfolder(Model):
                     lw_x = lw_x.mean(0)
 
         # forward pass unfolder
-        lw_z = self.forward(batch)  # .squeeze(-1)
+        lw_z = self.forward(batch)
 
         # compute pointwise reg loss
         match self.loss:
@@ -104,7 +134,7 @@ class KernelUnfolder(Model):
         return norm
 
 
-class AutoDiffUnfolder(Model):
+class AutoDiffUnfolder(Unfolder):
 
     def __init__(
         self,
@@ -112,42 +142,13 @@ class AutoDiffUnfolder(Model):
         cls_path,
         loss="mlc",
         norm="l1",
-        joint_ensembling=False,
-        norm_target=False,
         **kwargs,
     ):
 
-        super().__init__(net)
+        super().__init__(net, cls_path, freeze_classifier=False, **kwargs)
 
-        # loss
         self.loss = loss
         self.norm = norm
-        self.norm_target = norm_target
-
-        # ensembling
-        self.ensembled = self.net.ensembled
-        self.joint_ensembling = joint_ensembling
-
-        # load pretrained classifier
-        self.classifier, self.cfg_classifier = load_model(cls_path, freeze=False)
-        # self.params_cls = dict(self.classifier.named_parameters())
-        self.params_cls = list(self.classifier.parameters())
-        self.num_params_cls = sum(p.numel() for p in self.params_cls)
-
-        # logging
-        self.log_buffer = defaultdict(list)
-
-    @property
-    def lowlevel(self):
-        return self.net.lowlevel
-
-    def forward(self, batch: UnfoldingData):
-        """Return the part-level data-to-sim log-likelihood ratio"""
-
-        if self.lowlevel:
-            return self.net(batch.z, c=batch.cond_z, mask=batch.mask_z)
-
-        return self.net(batch.z)
 
     def batch_loss(self, batch: UnfoldingData):
 
@@ -240,48 +241,21 @@ class AutoDiffUnfolder(Model):
 
         return loss_gradnorm
 
-    @property
-    def trainable_parameters(self):
-        return (p for p in self.net.parameters() if (p.requires_grad and p.numel() > 0))
 
-
-class OmniFolder(Model):
+class OmniFolder(Unfolder):
 
     def __init__(
         self,
         net,
         cls_path,
         loss="mlc",
-        joint_ensembling=False,
         **kwargs,
     ):
 
-        super().__init__(net)
+        super().__init__(net, cls_path, **kwargs)
 
         # loss
         self.loss = loss
-
-        # ensembling
-        self.ensembled = self.net.ensembled
-        self.joint_ensembling = joint_ensembling
-
-        # load pretrained classifier
-        self.classifier, self.cfg_classifier = load_model(cls_path, freeze=True)
-
-        # logging
-        self.log_buffer = defaultdict(list)
-
-    @property
-    def lowlevel(self):
-        return self.net.lowlevel
-
-    def forward(self, batch: UnfoldingData):
-        """Return the part-level data-to-sim log-likelihood ratio"""
-
-        if self.lowlevel:
-            return self.net(batch.z, c=batch.cond_z, mask=batch.mask_z)
-
-        return self.net(batch.z)
 
     def batch_loss(self, batch: UnfoldingData):
 
@@ -334,6 +308,4 @@ class OmniFolder(Model):
 
         return loss_reg
 
-    @property
-    def trainable_parameters(self):
-        return (p for p in self.net.parameters() if p.requires_grad)
+

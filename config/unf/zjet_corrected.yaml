@@ -4,10 +4,11 @@ defaults:
   - override /dataset: zjet_corrected
   - _self_
 
-net:
-  dim_in: ${dataset.process.num_features}
-  dim_out: 1
-  ensembled: false
+model:
+  net:
+    dim_in: ${dataset.process.num_features}
+    dim_out: 1
+    ensembled: false
 
 training:
   lr: 1e-4

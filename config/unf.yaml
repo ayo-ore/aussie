@@ -1,12 +1,11 @@
 defaults:
   - /default
-  - /net: mlp
+  - /net@model.net: mlp
   - _self_
 
 run_name: unfold_${dataset.name}
 experiment: UnfoldingExperiment
 
-cls_path: ???
 prev_it_path: null
 
 model:
@@ -15,8 +14,7 @@ model:
   norm: l1
   joint_ensembling: false
   norm_target: false
-  net: ${net}
-  cls_path: ${cls_path}
+  cls_path: ???
   kernel_p: 2
   kernel_scale: 1
 

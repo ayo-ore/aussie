@@ -76,7 +76,7 @@ class IterationExperiment(BaseExperiment):
         os.makedirs(unf_dir + "/.hydra")
 
         # link step one and previous iteration
-        cfg.cls_path = cls_dir
+        cfg.model.cls_path = cls_dir
         cfg.prev_it_path = self.prev_it_path
 
         # optionally decay learning rate

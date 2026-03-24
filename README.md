@@ -116,8 +116,8 @@ python aussie.py --config-name unf ... training.batch_size=2048 training.lr=5e-4
 # Use a different dataset
 python aussie.py --config-name cls/yukawa
 
-# Chain AUSSIE steps 1 & 2 with the iteration experiment
-python aussie.py --config-name itr/yukawa model._target_=src.models.AutoDiffUnfolder
+# Chain AUSSIE steps 1 & 2 using the iteration experiment
+python aussie.py --config-name itr/yukawa unf.model._target_=src.models.AutoDiffUnfolder iterations=1
 
 # Skip training and only evaluate / plot existing results
 python aussie.py prev_exp_dir=<path/to/run> train=false

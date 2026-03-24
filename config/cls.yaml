@@ -1,6 +1,6 @@
 defaults:
   - /default
-  - /net: mlp
+  - /net@model.net: mlp
   - _self_
 
 run_name: classify_${dataset.name}
@@ -11,7 +11,6 @@ prev_it_path: null
 model:
   _target_: src.models.Classifier
   loss: bce
-  net: ${net}
 
 
 training:

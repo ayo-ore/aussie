@@ -8,16 +8,17 @@ defaults:
 data:
   on_gpu: false
 
-net:
-  backbone:
-    hidden_v_channels: 32
-    hidden_s_channels: 64
-    num_blocks: 4
-    num_heads: 4
-    mlp_ratio: 4
-    dropout_prob: 0.01
-  head:
-    layernorms: True
+model:
+  net:
+    backbone:
+      hidden_v_channels: 32
+      hidden_s_channels: 64
+      num_blocks: 4
+      num_heads: 4
+      mlp_ratio: 4
+      dropout_prob: 0.01
+    head:
+      layernorms: True
 
 
 training:

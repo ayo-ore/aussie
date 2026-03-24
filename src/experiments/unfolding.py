@@ -62,7 +62,7 @@ class UnfoldingExperiment(TrainingExperiment):
         # unfolding weights
         record = np.load(os.path.join(self.exp_dir, "predictions_test.npz"))
         # classifier weights
-        record_cls = np.load(os.path.join(self.cfg.cls_path, "predictions_test.npz"))
+        record_cls = np.load(os.path.join(self.model.cls_path, "predictions_test.npz"))
 
         # select simulation only
         labels = test_set[:].labels
