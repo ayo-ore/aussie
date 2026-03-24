@@ -12,12 +12,12 @@ Unfolding is the inverse problem of deconvolving observed (reco-level) measureme
 1. **Classification** — Train a classifier $R_\theta(x)$ to estimate the reco-level density ratio $p_\text{data}(x) / p_\text{sim}(x)$.
 2. **Unfolding** — Train a part-level network $\overline R_\varphi(z)$ such that its forward mapping matches $R_\theta(x)$, by minimizing the RKHS norm of the functional gradient of an MLC loss. This directly yields part-level weights that solve the unfolding integral equation — no iterations needed.
 
-Two loss functions are provided for the second step:
+Two unfolding model subclasses are provided for the second step:
 
-| Loss | Best for | Description |
+| Model | Best for | Description |
 |------|----------|-------------|
-| **Gaussian kernel** | Low-dimensional observables | Analytic kernel with a scale hyperparameter $\Lambda$ |
-| **AutoDiff** | High-dimensional / point-cloud data | Uses the Neural Tangent Kernel via `autograd`; no extra hyperparameters |
+| `KernelUnfolder` | Low-dimensional observables | Analytic RBF kernel with a scale hyperparameter $\Lambda$ |
+| `AutoDiffUnfolder` | High-dimensional / point-cloud data | Uses the Neural Tangent Kernel via `autograd`; no extra hyperparameters |
 
 
 ## Project Structure
@@ -45,7 +45,7 @@ aussie/
 │   │   └── iteration.py        # OmniFold iterative baseline
 │   ├── models/             # Model wrappers
 │   │   ├── classifier.py   #   Classifier model
-│   │   └── unfolder.py     #   Unfolder model (Gauss & AutoDiff losses)
+│   │   └── unfolder.py     #   Unfolder models (Kernel & AutoDiff subclasses)
 │   ├── networks/           # Neural network architectures
 │   │   ├── mlp.py          #   Multi-layer perceptron
 │   │   ├── lgatr.py        #   Lorentz Geometric Algebra Transformer
@@ -117,7 +117,7 @@ python aussie.py --config-name unf ... training.batch_size=2048 training.lr=5e-4
 python aussie.py --config-name cls/yukawa
 
 # Chain AUSSIE steps 1 & 2 with the iteration experiment
-python aussie.py --config-name itr/yukawa model._target_=src.models.Unfolder
+python aussie.py --config-name itr/yukawa model._target_=src.models.AutoDiffUnfolder
 
 # Skip training and only evaluate / plot existing results
 python aussie.py prev_exp_dir=<path/to/run> train=false

@@ -1,4 +1,10 @@
 from .classifier import Classifier, PartClassifier
-from .unfolder import Unfolder, OmniFolder, RKHSUnfolder
+from .unfolder import AutoDiffUnfolder, OmniFolder, KernelUnfolder
 
-__all__ = ["Classifier", "PartClassifier", "Unfolder", "OmniFolder", "RKHSUnfolder"]
+__all__ = [
+    "Classifier",
+    "PartClassifier",
+    "AutoDiffUnfolder",
+    "OmniFolder",
+    "KernelUnfolder",
+]

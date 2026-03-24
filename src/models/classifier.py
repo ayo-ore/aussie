@@ -7,6 +7,13 @@ from src.datasets import UnfoldingData
 
 class Classifier(Model):
 
+    def __init__(self, net, loss="bce"):
+
+        super().__init__(net)
+
+        self.loss = loss
+        self.ensembled = self.net.ensembled
+
     @property
     def lowlevel(self):
         return self.net.lowlevel
@@ -21,7 +28,7 @@ class Classifier(Model):
         logits_sim = logits[..., mask_sim]  # ellipsis to handle ensembling
         logits_dat = logits[..., ~mask_sim]
 
-        match self.cfg.loss:
+        match self.loss:
 
             case "bce":
                 loss_dat = F.binary_cross_entropy_with_logits(
@@ -34,7 +41,7 @@ class Classifier(Model):
                 loss_dat = -logits_dat + (-logits_dat).exp()
                 loss_sim = logits_sim + logits_sim.exp()
             case _:
-                raise ValueError
+                raise ValueError(f"Unknown loss {self.loss}")
 
         # sample weights
         if batch.sample_logweights is not None:
