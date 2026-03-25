@@ -9,7 +9,7 @@ ml cuda/12.8 cudnn/11.6 anaconda/3.0
 
 # conda
 eval "$(conda shell.bash hook)"
-conda activate aussie
+conda activate deep # aussie
 
 # auto completion
 eval "$(python aussie.py -sc install=bash)"

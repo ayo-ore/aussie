@@ -155,9 +155,15 @@ class Unfolder(Model):
                 if self.ensembled
                 else None
             )
+
+            if hasattr(self.cfg, "grad_module"):
+                params = getattr(self.classifier.net, self.cfg.grad_module).parameters()
+            else:
+                params = self.classifier.trainable_parameters
+
             grads_x = torch.autograd.grad(
                 loss_reg,
-                self.classifier.trainable_parameters,
+                params,
                 create_graph=True,
                 grad_outputs=grad_outputs,
                 is_grads_batched=self.ensembled,
@@ -182,7 +188,7 @@ class Unfolder(Model):
 
         self.log_scalar(loss_reg, "loss_reg")
         self.log_scalar(loss_gradnorm, "loss_gradnorm")
-        
+
         # # log the omnifold loss
         # with torch.no_grad():
         #     loss_omnifold = (-lw_x.exp() * lw_z - (1 - lw_z.exp())) / 2
@@ -337,7 +343,7 @@ class RKHSUnfolder(Unfolder):
         # forward pass classifier
         self.classifier.eval()
         with torch.no_grad():
-            lw_x = self.classifier(batch).squeeze(-1)
+            lw_x = self.classifier(batch)  # .squeeze(-1)
             if self.classifier.ensembled:
 
                 if self.cfg.joint_ensembling:
@@ -385,7 +391,6 @@ class RKHSUnfolder(Unfolder):
         self.log_scalar(loss_omnifold.mean(), "loss_omnifold")
 
         self.log_scalar(loss_reg.mean(), "r2_mean")
-        self.log_scalar(K.sum() / (B * (B - 1)), "kernel_mean")
 
         return norm
 
@@ -902,3 +907,355 @@ class JacobianReg(torch.autograd.Function):
 
         # Return gradients for (lw_z, batch, classifier, params, buffers, scale)
         return grad_lw_z, None, None, None, None, None
+
+
+import torch.distributions as td
+import math
+
+
+class OmniFolderGaussian(Model):
+
+    def __init__(self, cfg: DictConfig):
+
+        super().__init__(cfg)
+
+        self.cfg = cfg
+
+        # load pretrained classifier
+        self.classifier, self.cfg_classifier = load_model(
+            self.cfg.cls_path, Classifier, freeze=False
+        )
+
+        # logging
+        self.log_buffer = defaultdict(list)
+
+        # bayesian
+        self.bayesian = self.net.bayesian
+        if self.bayesian:
+            self.register_buffer("train_size", torch.zeros(()))
+
+        # ensembling
+        self.ensembled = self.net.ensembled
+
+        SMEAR_WIDTH = 2
+        MU_SIM = 0.0
+        MU_DAT = 0.2
+        SIGMA_SIM = 1.0
+        SIGMA_DAT = 0.9
+        px_sim = td.Normal(MU_SIM, math.sqrt(SIGMA_SIM**2 + SMEAR_WIDTH**2))
+        px_dat = td.Normal(MU_DAT, math.sqrt(SIGMA_DAT**2 + SMEAR_WIDTH**2))
+        self.log_Rx_true = lambda x: (px_dat.log_prob(x) - px_sim.log_prob(x)).squeeze(
+            -1
+        )
+
+    @property
+    def lowlevel(self):
+        return isinstance(self.net, (TransformerEncoder, LGATr))
+
+    def forward(self, batch: UnfoldingData):
+        """Return the part-level data-to-sim log-likelihood ratio"""
+
+        if self.lowlevel:
+            return self.net(batch.z, c=batch.cond_z, mask=batch.mask_z)
+
+        return self.net(batch.z)
+
+    def batch_loss(self, batch: UnfoldingData):
+
+        # restrict to simulation only
+        batch = batch[batch.labels == 0]
+
+        # forward pass unfolder
+        lw_z = self.forward(batch).squeeze(-1)
+
+        self.classifier.eval()  # disable batchnorm, dropout etc.
+        with torch.no_grad():
+            lw_x = self.classifier(batch).squeeze(-1).detach()
+
+        if self.classifier.ensembled:
+
+            if self.cfg.joint_ensembling:
+                # combine classifier and unfolder ensemble members elementwise
+                assert self.ensembled == self.classifier.ensembled
+            else:
+                # average over classifier ensemble
+                lw_x = lw_x.mean(0)
+
+        if batch.sample_logweights is not None:
+            lw_x = lw_x + batch.sample_logweights
+
+        # calculate regression loss
+        match self.cfg.loss:
+
+            case "mse":
+                loss_reg = (lw_z - lw_x).pow(2)
+            case "mse2":
+                loss_reg = (lw_z.exp() - lw_x.exp()).pow(2)
+            case "bce":
+                loss_reg = (
+                    (lw_x.exp() + 1) * torch.nn.functional.softplus(-lw_z) + lw_z
+                ) / 2
+            case "mlc":
+                loss_reg = (-lw_x.exp() * lw_z - (1 - lw_z.exp())) / 2
+
+        # # sample weights
+        # if batch.sample_logweights is not None:
+        #     loss_reg = loss_reg * batch.sample_logweights.exp()
+
+        # average
+        batch_dim = (0, 1) if self.ensembled else 0
+        loss_reg = loss_reg.mean(batch_dim)
+        self.log_scalar(loss_reg, "loss_reg")
+
+        # log the aussie regression loss
+        with torch.no_grad():
+            log_Rx_true = self.log_Rx_true(batch.x)
+            loss_mlc = (-lw_z.exp() * log_Rx_true - (1 - log_Rx_true.exp())) / 2
+            loss_omnifold = (-log_Rx_true.exp() * lw_z - (1 - lw_z.exp())) / 2
+
+        self.log_scalar(loss_mlc.mean(batch_dim), "loss_mlc")
+        self.log_scalar(loss_omnifold.mean(batch_dim), "loss_omnifold")
+
+        return loss_reg
+
+    @property
+    def trainable_parameters(self):
+        return (p for p in self.net.parameters() if p.requires_grad)
+
+
+class AutoDiffUnfolder(Unfolder):
+
+    def batch_loss(self, batch: UnfoldingData):
+
+        # restrict to simulation only
+        batch = batch[batch.labels == 0]
+
+        # forward pass unfolder
+        lw_z = self.forward(batch).squeeze(-1)
+
+        # calculate gradnorm loss
+        with torch.enable_grad():
+
+            self.classifier.eval()  # disable batchnorm, dropout etc.
+
+            # forward pass classifier
+            lw_x = torch.utils.checkpoint.checkpoint(
+                self.classifier, batch, use_reentrant=False
+            ).squeeze(-1)
+
+            if self.classifier.ensembled:
+
+                if self.cfg.joint_ensembling:
+                    # combine classifier and unfolder ensemble members elementwise
+                    assert self.ensembled == self.classifier.ensembled
+                else:
+                    # average over classifier ensemble
+                    lw_x = lw_x.mean(0)
+
+            if self.cfg.norm_target:
+                norm = lw_x.clone().detach().exp().mean()
+                lw_x -= norm.log()  # ensure norm is precisely 1 batchwise
+
+            # calculate regression loss
+            match self.cfg.loss:
+
+                case "mse":
+                    loss_reg = (lw_z.exp() - lw_x.exp()).pow(2)
+                case "bce":
+                    loss_reg = (
+                        (lw_z.exp() + 1) * torch.nn.functional.softplus(-lw_x) + lw_x
+                    ) / 2
+                case "mlc":
+                    loss_reg = (-lw_z.exp() * lw_x - (1 - lw_x.exp())) / 2
+
+            # sample weights
+            if batch.sample_logweights is not None:
+                loss_reg = loss_reg * batch.sample_logweights.exp()
+
+            # split into independent batches for unbiased estimator
+            batch_dim = int(bool(self.ensembled))
+            B = loss_reg.size(batch_dim)
+            loss_reg_A, loss_reg_B = loss_reg.split([B // 2, B - B // 2], dim=batch_dim)
+
+            loss_reg_A = loss_reg_A.mean(batch_dim)
+            loss_reg_B = loss_reg_B.mean(batch_dim)
+
+            # take gradients (in parallel if ensembled)
+            grad_outputs = (
+                torch.eye(self.ensembled, device=lw_z.device, dtype=lw_z.dtype)
+                if self.ensembled
+                else None
+            )
+
+            if hasattr(self.cfg, "grad_module"):
+                params = list(
+                    getattr(self.classifier.net, self.cfg.grad_module).parameters()
+                )
+            else:
+                params = self.params_cls
+
+            grads_A = torch.autograd.grad(
+                loss_reg_A,
+                params,
+                create_graph=True,
+                retain_graph=True,
+                grad_outputs=grad_outputs,
+                is_grads_batched=self.ensembled,
+                allow_unused=True,
+            )
+            grads_B = torch.autograd.grad(
+                loss_reg_B,
+                params,
+                create_graph=True,
+                retain_graph=True,
+                grad_outputs=grad_outputs,
+                is_grads_batched=self.ensembled,
+                allow_unused=True,
+            )
+
+            norm2 = sum(
+                (a * b).sum()
+                for a, b in zip(grads_A, grads_B)
+                if (a is not None and b is not None)
+            )
+
+        self.log_scalar((loss_reg_A + loss_reg_B) / 2, "loss_reg")
+        self.log_scalar(norm2, "loss_gradnorm")
+
+        # # log the omnifold loss
+        # with torch.no_grad():
+        #     loss_omnifold = (-lw_x.exp() * lw_z - (1 - lw_z.exp())) / 2
+        # self.log_scalar(loss_omnifold, "loss_omnifold")
+
+        # scale result
+        norm2 = norm2 * 1e3
+        if self.ensembled:
+            # make lr scale independent of ensemble size
+            norm2 = norm2 * self.ensembled
+
+        # return norm2**2
+        return torch.nn.functional.leaky_relu(norm2, self.cfg.leak)
+        # return torch.nn.functional.softplus(norm2, beta=self.cfg.beta)
+
+
+from torch.func import functional_call, vmap, grad
+
+
+class NTKRKHSUnfolder(Unfolder):
+    """
+    NTK-RKHS loss computed on batch.x using Hutchinson probes + JVP.
+    No aux_x needed.
+
+    Assumes classifier.net can be called as classifier.net(batch.x) and returns lw_x.
+    """
+
+    @staticmethod
+    def _rademacher_like_paramdict(param_dict):
+        # Rademacher ±1 probes (often lower variance than Gaussian)
+        return {
+            k: (torch.randint_like(v, 0, 2) * 2 - 1).to(v.dtype)
+            for k, v in param_dict.items()
+        }
+
+    def batch_loss(self, batch):
+        # restrict to simulation only
+        batch = batch[batch.labels == 0]
+        B = len(batch)
+        if B < 2:
+            return torch.zeros((), device=batch.device)
+
+        # ---- unfolder forward ----
+        lw_z = self.forward(batch).squeeze(-1)  # (B,)
+
+        # ---- classifier forward on tensor input ----
+        self.classifier.eval()
+        x = batch.x
+
+        # baseline classifier output for residual construction (checkpoint optional)
+        lw_x = torch.utils.checkpoint.checkpoint(
+            self.classifier.net, x, use_reentrant=False
+        ).squeeze(
+            -1
+        )  # (B,) typically
+
+        # handle classifier ensemble (match your conventions)
+        if self.classifier.ensembled:
+            if self.cfg.joint_ensembling:
+                assert self.ensembled == self.classifier.ensembled
+            else:
+                lw_x = lw_x.mean(0)  # average classifier ensemble members
+
+        # optional batchwise normalization
+        if self.cfg.norm_target:
+            norm = lw_x.detach().exp().mean()
+            lw_x = lw_x - norm.log()
+
+        # ---- residual r_i (use your RKHSUnfolder definition) ----
+        match self.cfg.loss:
+            case "mse":
+                r = lw_z.exp() - lw_x.exp()
+            case "bce":
+                r = (1 - (lw_z - lw_x).exp()) / (1 + lw_x.exp())
+            case "mlc":
+                r = 1 - (lw_z - lw_x).exp()
+            case _:
+                raise ValueError(self.cfg.loss)
+
+        if batch.sample_logweights is not None:
+            r = r * batch.sample_logweights.exp()
+
+        r = r.reshape(-1)  # (B,)
+        r2 = r * r
+
+        # ---- choose classifier params for NTK ----
+        # Use grad_module subset if requested; else use all classifier params (or your self.params_cls)
+        if hasattr(self.cfg, "grad_module"):
+            # subset params on the net
+            named = dict(
+                getattr(self.classifier.net, self.cfg.grad_module).named_parameters()
+            )
+        else:
+            named = dict(self.classifier.net.named_parameters())
+
+        # param dict for functional_call must include only tensors (no buffers)
+        # Ensure requires_grad True so jvp can see param dependence
+        param_dict = {k: v for k, v in named.items() if v.requires_grad}
+
+        if len(param_dict) == 0:
+            raise RuntimeError(
+                "No classifier parameters with requires_grad=True for NTK computation."
+            )
+
+        # ---- define vector function F(params) -> lw_x vector (B,) ----
+        def F(pd):
+            out = functional_call(self.classifier.net, pd, (x,)).squeeze(-1)
+            if self.classifier.ensembled and not self.cfg.joint_ensembling:
+                out = out.mean(0)
+            if self.cfg.norm_target:
+                nrm = out.detach().exp().mean()
+                out = out - nrm.log()
+            return out  # (B,)
+
+        # ---- Hutchinson estimate of off-diagonal r^T K r ----
+        M = int(getattr(self.cfg, "num_probes", 1))
+        Q = 0.0
+
+        for _ in range(M):
+            u = self._rademacher_like_paramdict(param_dict)
+            _, alpha = jvp(F, (param_dict,), (u,))  # alpha = J u, shape (B,)
+
+            s = (r * alpha).sum()
+            Q = Q + (s * s - (r2 * (alpha * alpha)).sum())
+
+        Q = Q / M
+        norm2 = Q / (B * (B - 1))
+
+        # return squared RKHS norm (usually more stable than sqrt)
+        loss = norm2 * 1e3
+
+        # log the aussie regression loss
+        with torch.no_grad():
+            loss_mlc = (-lw_z.exp() * lw_x - (1 - lw_x.exp())) / 2
+        self.log_scalar(loss_mlc.mean(), "loss_mlc")
+
+        return loss.clamp(min=0.0)

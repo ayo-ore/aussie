@@ -1,4 +1,5 @@
 from .base_dataset import UnfoldingData
+from .bart import BartData, BartProcess
 from .gaussian import GaussianToyData, GaussianToyProcess
 from .omnifold import OmniFoldData, OmniFoldProcess, OmniFoldObsData, OmniFoldObsProcess
 from .omnifold_cartesian import OmniFoldCartesianData, OmniFoldCartesianProcess

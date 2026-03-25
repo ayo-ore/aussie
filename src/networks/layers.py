@@ -4,9 +4,10 @@ import torch.nn.functional as F
 import math
 import numpy as np
 
-from xformers.ops import memory_efficient_attention
 from jvp_flash_attention.jvp_attention import attention as jvp_attention
+from torch.nn.attention import SDPBackend, sdpa_kernel
 from typing import Optional
+from xformers.ops import memory_efficient_attention
 
 
 class FeedForward(nn.Module):
@@ -62,6 +63,28 @@ class Attention(nn.Module):
 
         if self.use_jvp:
 
+            # B, N, C = x.shape
+            # qkv = (
+            #     self.qkv(x)
+            #     .reshape(B, N, 3, self.num_heads, self.head_dim)
+            #     .permute(2, 0, 3, 1, 4)
+            # )
+            # q, k, v = qkv.unbind(0)
+            # q, k = self.q_norm(q), self.k_norm(k)
+
+            # # # dont attend to padded elements
+            # attn_mask = None if mask is None else mask.view(B, 1, 1, N).expand(-1, self.num_heads, N, -1)
+
+            # x = jvp_attention(
+            #     q,
+            #     k,
+            #     v,
+            #     attn_mask=attn_mask,
+            #     causal=self.is_causal,
+            #     dropout_p=self.drop_attn.p if self.training else 0.0,
+            # )
+            # x = x.transpose(1, 2).reshape(B, N, C)
+
             B, N, C = x.shape
             qkv = (
                 self.qkv(x)
@@ -74,16 +97,29 @@ class Attention(nn.Module):
             # # dont attend to padded elements
             attn_mask = None if mask is None else mask.view(B, 1, 1, N).expand(-1, self.num_heads, N, -1)
 
-            x = jvp_attention(
-                q,
-                k,
-                v,
-                attn_mask=attn_mask,
-                causal=self.is_causal,
-                dropout_p=self.drop_attn.p if self.training else 0.0,
-            )
+            # Only enable flash attention backend
+            with sdpa_kernel(SDPBackend.MATH):
+                x = F.scaled_dot_product_attention(
+                    q,
+                    k,
+                    v,
+                    is_causal=self.is_causal,
+                    attn_mask=attn_mask,
+                    dropout_p=self.drop_attn.p if self.training else 0.0,
+                )
             x = x.transpose(1, 2).reshape(B, N, C)
         else:
+            # B, N, C = x.shape
+            # qkv = (
+            #     self.qkv(x)
+            #     .reshape(B, N, 3, self.num_heads, self.head_dim)
+            #     .permute(2, 0, 3, 1, 4)
+            # )
+            # q, k, v = qkv.unbind(0)
+            # q, k = self.q_norm(q), self.k_norm(k)
+
+            # # dont attend to padded elements
+            # attn_mask = None if mask is None else mask.view(B, 1, 1, N)
             # x = F.scaled_dot_product_attention(
             #     q,
             #     k,

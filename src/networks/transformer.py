@@ -50,10 +50,14 @@ class TransformerEncoder(nn.Module):
         self.conditional = dim_cond is not None
         if self.conditional:
             self.proj_cond = nn.Linear(dim_cond, hidden_channels)
+        #     block = CondTransformerBlock
+        # else:
+        #     block = TransformerBlock
 
         # transformer blocks
         self.blocks = nn.ModuleList(
             [
+                # block(
                 TransformerBlock(
                     hidden_channels,
                     num_heads,
@@ -86,7 +90,7 @@ class TransformerEncoder(nn.Module):
             x = x + self.pos_encoding.weight[None, : x.size(1), :]
 
         if self.conditional:
-            # append condition as token
+            # c = self.proj_cond(c) # for AdaLN conditioning
             c = self.proj_cond(c).unsqueeze(1)
             x = torch.cat([c, x], dim=1)
             mask = F.pad(mask, (1, 0), value=1)
@@ -103,6 +107,9 @@ class TransformerEncoder(nn.Module):
 
         # forward pass through transformer stack
         for block in self.blocks:
+            # if self.conditional:
+            #     x = block(x, c=c, mask=mask)
+            # else:
             x = block(x, mask=mask)
 
         # aggregate
@@ -171,3 +178,36 @@ class TransformerBlock(nn.Module):
         x = x + self.ffwd(self.norm2(x))
 
         return x
+
+
+class CondTransformerBlock(TransformerBlock):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.adaLN_modulation = nn.Sequential(
+            nn.SiLU(),
+            nn.Linear(self.hidden_channels, 6 * self.hidden_channels, bias=True),
+        )
+
+    def forward(
+        self, x: torch.Tensor, c: torch.Tensor, mask: Optional[torch.Tensor] = None
+    ) -> torch.Tensor:
+
+        shift_msa, scale_msa, gate_msa, shift_mlp, scale_mlp, gate_mlp = (
+            self.adaLN_modulation(c).chunk(6, dim=1)
+        )
+        x = modulate(self.norm1(x), shift_msa, scale_msa)
+        if self.checkpoint_grads:
+            x = x + gate_msa.unsqueeze(1) * checkpoint(
+                self.attn, x, mask, use_reentrant=False
+            )
+        else:
+            x = x + gate_msa.unsqueeze(1) * self.attn(x, mask)
+
+        x = modulate(self.norm2(x), shift_mlp, scale_mlp)
+        x = x + gate_mlp.unsqueeze(1) * self.ffwd(x)
+
+        return x
+
+
+def modulate(x, shift, scale):
+    return x * (1 + scale.unsqueeze(1)) + shift.unsqueeze(1)
