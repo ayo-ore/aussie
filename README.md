@@ -94,7 +94,7 @@ python aussie.py --config-name cls/gaussian
 Train the part-level unfolder, pointing to the trained classifier:
 
 ```bash
-python aussie.py --config-name unf/gaussian cls_path=<path/to/classifier/run>
+python aussie.py --config-name unf/gaussian model.cls_path=<path/to/classifier/run>
 ```
 
 ### OmniFold Baseline
