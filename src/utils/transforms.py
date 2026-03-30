@@ -1,5 +1,4 @@
 import torch
-from lgatr import get_spurions
 
 class ShiftAndScale:
     """
@@ -124,6 +123,13 @@ class LorentzTransform:
         vectors, scalars = features[..., :4], features[..., 4:]
 
         # create reference features
+        try:
+            from lgatr import get_spurions
+        except ImportError:
+            raise ImportError(
+                "The 'lgatr' package is required for LorentzTransform. "
+                "Please install it with 'pip install lgatr'."
+            )
         ref_vectors = get_spurions(beam_spurion="lightlike")[..., 1:5]  # (3, 4)
         ref_scalars = -torch.ones_like(scalars[:, [0]])  # (B, 1, C)
 
