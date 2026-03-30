@@ -4,7 +4,6 @@ import torch.nn.functional as F
 
 from torch.utils.checkpoint import checkpoint
 from typing import Optional
-from xformers.ops.fmha import BlockDiagonalMask
 
 from .layers import Attention, FeedForward
 
@@ -69,6 +68,11 @@ class TransformerEncoder(nn.Module):
         if self.encode_pos:
             self.pos_encoding = nn.Embedding(max_len, hidden_channels)
 
+        if not use_jvp:
+            # Lazy import xformers only when needed
+            from xformers.ops.fmha import BlockDiagonalMask            
+            self.mask_init = BlockDiagonalMask.from_seqlens
+
         self.lowlevel = True
 
     def forward(
@@ -99,7 +103,7 @@ class TransformerEncoder(nn.Module):
         if not self.use_jvp:
             # create packed tensor
             x = x[None, ..., mask, :]
-            mask = BlockDiagonalMask.from_seqlens(lengths.tolist(), device=x.device)
+            mask = self.mask_init(lengths.tolist(), device=x.device)
 
         # forward pass through transformer stack
         for block in self.blocks:

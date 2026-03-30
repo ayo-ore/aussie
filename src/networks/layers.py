@@ -3,8 +3,6 @@ import torch.nn as nn
 import torch.nn.functional as F
 import math
 
-from xformers.ops import memory_efficient_attention
-from jvp_flash_attention.jvp_attention import attention as jvp_attention
 from typing import Optional
 
 
@@ -54,6 +52,14 @@ class Attention(nn.Module):
         self.drop_proj = nn.Dropout(drop_proj)
         self.use_jvp = use_jvp
 
+        # Lazy import jvp_flash_attention/xformers only when needed
+        if use_jvp:
+            from jvp_flash_attention.jvp_attention import attention as jvp_attention            
+            self.attention = jvp_attention
+        else:
+            from xformers.ops import memory_efficient_attention
+            self.attention = memory_efficient_attention
+
     def forward(
         self, x: torch.Tensor, mask: Optional[torch.Tensor] = None
     ) -> torch.Tensor:
@@ -76,7 +82,7 @@ class Attention(nn.Module):
                 else mask.view(B, 1, 1, N).expand(-1, self.num_heads, N, -1)
             )
 
-            x = jvp_attention(
+            x = self.attention(
                 q,
                 k,
                 v,
@@ -86,6 +92,7 @@ class Attention(nn.Module):
             )
             x = x.transpose(1, 2).reshape(B, N, C)
         else:
+
             # x = F.scaled_dot_product_attention(
             #     q,
             #     k,
@@ -104,7 +111,7 @@ class Attention(nn.Module):
             q, k, v = qkv.unbind(0)
             q, k = self.q_norm(q), self.k_norm(k)
 
-            x = memory_efficient_attention(
+            x = self.attention(
                 q,
                 k,
                 v,
